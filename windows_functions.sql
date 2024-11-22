@@ -69,4 +69,79 @@ WHERE rank = 1
 
 
 
+-- Часть 2. Задание 1.
+
+SELECT s.shop_number,                    
+    sh.city,  
+    sh.address,    
+    SUM(s.quantity) AS sum_qty, -- суммируем количество товаров
+    SUM(s.quantity * g.price) AS sum_qty_price -- сумма покупок
+FROM sales s
+JOIN shops sh ON s.shop_number = sh.shop_number -- присоединяем таблицу магазинов
+JOIN goods g ON s.good_id = g.good_id        -- присоединяем таблицу товаров   
+WHERE s.date = '2016-02-01'        -- отбираем нужную дату            
+GROUP BY s.shop_number, sh.city, sh.address 
+ORDER BY s.shop_number  
+
+
+-- Часть 2. Задание 2.
+
+SELECT s.date AS date_,                             
+    sh.city,  
+    -- вычисляем долю продаж
+    SUM(s.quantity * g.price) / -- сумма продаж в конкретном городе
+    SUM(SUM(s.quantity * g.price)) OVER (PARTITION BY s.date) AS sum_sales_rel -- сумма всех продаж в рублях для каждой даты
+FROM sales s
+JOIN shops sh ON s.shop_number = sh.shop_number    -- присоединяем таблицу магазинов
+JOIN goods g ON s.good_id = g.good_id             -- присоединяем таблицу товаров   
+WHERE g.category = 'ЧИСТОТА'               -- отбираем только категорию "Чистота"        
+GROUP BY s.date, sh.city                               
+ORDER BY s.date, sh.city  
+
+
+-- Часть 2. Задание 3.
+
+-- временная таблица
+WITH ranked_goods AS (
+    SELECT s.date AS date_,              
+        s.shop_number,                
+        s.good_id,                    
+        SUM(s.quantity) AS total_qty, -- суммарное количество продаж товара
+        RANK() OVER (
+            PARTITION BY s.date, s.shop_number  -- разделяем по дате и номеру магазина
+            ORDER BY SUM(s.quantity) DESC    -- сортируем по количеству продаж, по убыванию
+        ) AS rnk                  -- присваиваем ранг       
+    FROM  sales s
+    GROUP BY s.date, s.shop_number, s.good_id 
+)
+SELECT date_, shop_number, good_id
+FROM ranked_goods
+WHERE rnk <= 3 -- отбираем только топ-3 товары по продажам
+ORDER BY date_, shop_number, rnk
+
+
+-- Часть 2. Задание 4.
+
+WITH sales_with_prev AS (
+    SELECT s.date AS date_,                             
+        s.shop_number,                               
+        g.category,                                  
+        SUM(s.quantity * g.price) AS total_sales,      -- сумма продаж
+        LAG(s.date) OVER (PARTITION BY s.shop_number, g.category ORDER BY s.date) AS prev_date -- используем оконную функцию LAG(s.date) для нахождения предыдущей даты по каждому магазину и категории
+    FROM  sales s
+    JOIN shops sh ON s.shop_number = sh.shop_number    
+    JOIN goods g ON s.good_id = g.good_id             
+    WHERE sh.city = 'СПб'         -- условие для магазинов в Санкт-Петербурге        
+    GROUP BY s.date, s.shop_number, g.category            
+)
+SELECT t1.date_ AS date_,                               
+    t1.shop_number,                                 
+    t1.category,                                     
+    t2.total_sales AS prev_sales                    
+FROM sales_with_prev t1
+LEFT JOIN sales_with_prev t2 -- объединяем таблицу sales_with_prev саму с собой
+ON t1.shop_number = t2.shop_number AND            
+    t1.category = t2.category AND                    
+    t1.prev_date = t2.date_                          
+ORDER BY t1.date_, t1.shop_number, t1.category;  
 
