@@ -145,3 +145,117 @@ ON t1.shop_number = t2.shop_number AND
     t1.prev_date = t2.date_                          
 ORDER BY t1.date_, t1.shop_number, t1.category;  
 
+
+-- Часть 3.
+
+-- создание таблицы
+CREATE TABLE query (
+    searchid INT PRIMARY KEY,   -- id запроса
+    year INT,                   -- год
+    month INT,                  -- месяц
+    day INT,                    -- день
+    userid INT,                 -- id пользователя
+    ts INT,                     -- время запроса в формате UNIX
+    devicetype VARCHAR(50),     -- тип устройства (например, mobile, desktop)
+    deviceid VARCHAR(50),       -- id устройства
+    query VARCHAR(255)          -- поисковой запрос
+)
+
+-- заполнение данными
+
+INSERT INTO query (searchid, year, month, day, userid, ts, devicetype, deviceid, query) VALUES
+(1, 2023, 10, 1, 101, 1633084800, 'mobile', 'dev1', 'к'),
+(2, 2023, 10, 1, 101, 1633084860, 'mobile', 'dev1', 'ку'),
+(3, 2023, 10, 1, 101, 1633084920, 'mobile', 'dev1', 'куп'),
+(4, 2023, 10, 1, 101, 1633084980, 'mobile', 'dev1', 'купить'),
+(5, 2023, 10, 1, 101, 1633085040, 'mobile', 'dev1', 'купить кур'),
+(6, 2023, 10, 1, 101, 1633085100, 'mobile', 'dev1', 'купить курт'),
+(7, 2023, 10, 1, 101, 1633085160, 'mobile', 'dev1', 'купить куртку'),
+(8, 2023, 10, 2, 102, 1633171200, 'desktop', 'dev2', 'планшет'),
+(9, 2023, 10, 2, 102, 1633171260, 'desktop', 'dev2', 'купить планшет'),
+(10, 2023, 10, 2, 103, 1633171320, 'desktop', 'dev3', 'телефон'),
+(11, 2023, 10, 3, 104, 1633257600, 'mobile', 'dev4', 'ноутбук'),
+(12, 2023, 10, 3, 104, 1633257660, 'mobile', 'dev4', 'купить ноутбук'),
+(13, 2023, 10, 4, 105, 1633344000, 'mobile', 'dev5', 'игра'),
+(14, 2023, 10, 4, 105, 1633344060, 'mobile', 'dev5', 'купить игру'),
+(15, 2023, 10, 5, 106, 1633430400, 'desktop', 'dev6', 'наушники'),
+(16, 2023, 10, 5, 106, 1633430460, 'desktop', 'dev6', 'купить наушники'),
+(17, 2023, 10, 6, 107, 1633516800, 'mobile', 'dev7', 'мышка'),
+(18, 2023, 10, 6, 107, 1633516860, 'mobile', 'dev7', 'купить мышку'),
+(19, 2023, 10, 7, 108, 1633603200, 'desktop', 'dev8', 'сумка'),
+(20, 2023, 10, 7, 108, 1633603260, 'desktop', 'dev8', 'купить сумку')
+
+
+
+-- для каждого запроса определим значение is_final:
+WITH query_with_next AS (
+    SELECT q.searchid,
+        q.userid,
+        q.deviceid,
+        to_timestamp(q.ts) AS ts,  -- преобразуем время в читаемый формат
+        q.query,
+        LEAD(q.ts) OVER (PARTITION BY q.userid, q.deviceid ORDER BY q.ts) AS next_ts_unix,  -- следующий запрос (UNIX-время)
+        LEAD(q.query) OVER (PARTITION BY q.userid, q.deviceid ORDER BY q.ts) AS next_query  -- следующий запрос
+    FROM query q
+)
+SELECT q.searchid,
+    q.userid,
+    q.deviceid,
+    q.ts,
+    to_timestamp(q.next_ts_unix) AS next_ts, -- преобразуем время следующего запроса
+    q.query,
+    CASE
+        -- условие для is_final = 1: Нет следующего запроса или время между запросами > 3 минут
+        WHEN (q.next_ts_unix IS NULL) OR (q.next_ts_unix - extract(epoch FROM q.ts) > 180) THEN 1
+        -- условие для is_final = 2: Следующий запрос короче, и время между запросами > 1 минута
+        WHEN LENGTH(q.next_query) < LENGTH(q.query) AND (q.next_ts_unix - extract(epoch FROM q.ts) > 60) THEN 2
+        -- иначе is_final = 0
+        ELSE 0
+    END AS is_final
+FROM query_with_next q
+ORDER BY q.ts;
+
+-- выведем детальные данные о времени и там, где is_final = 1 
+WITH query_with_next AS (
+    SELECT q.searchid,
+        q.year,
+        q.month,
+        q.day,
+        q.userid,
+        q.deviceid,
+        q.devicetype,
+        to_timestamp(q.ts) AS ts, 
+        q.query,
+        LEAD(q.ts) OVER (PARTITION BY q.userid, q.deviceid ORDER BY q.ts) AS next_ts_unix,  
+        LEAD(q.query) OVER (PARTITION BY q.userid, q.deviceid ORDER BY q.ts) AS next_query 
+    FROM query q
+)
+SELECT q.year,            -- год запроса
+    q.month,           -- месяц запроса
+    q.day,             -- день запроса
+    q.userid,          -- id пользователя
+    q.ts,              -- время текущего запроса
+    q.devicetype,      -- тип устройства
+    q.deviceid,        -- id устройства
+    q.query,           -- текущий запрос
+    q.next_query,      -- следующий запрос
+    CASE
+        -- условие для is_final = 1: Нет следующего запроса или время между запросами > 3 минут
+        WHEN (q.next_ts_unix IS NULL) OR (q.next_ts_unix - extract(epoch FROM q.ts) > 180) THEN 1
+        -- условие для is_final = 2: Следующий запрос короче, и время между запросами > 1 минута
+        WHEN LENGTH(q.next_query) < LENGTH(q.query) AND (q.next_ts_unix - extract(epoch FROM q.ts) > 60) THEN 2
+        -- иначе is_final = 0
+        ELSE 0
+    END AS is_final
+FROM query_with_next q
+WHERE 
+    -- фильтруем только записи с is_final = 1
+    (CASE
+        WHEN (q.next_ts_unix IS NULL) OR (q.next_ts_unix - extract(epoch FROM q.ts) > 180) THEN 1
+        WHEN LENGTH(q.next_query) < LENGTH(q.query) AND (q.next_ts_unix - extract(epoch FROM q.ts) > 60) THEN 2
+        ELSE 0
+    END) = 1
+ORDER BY q.ts;
+
+
+
